@@ -1,0 +1,1 @@
+# Deployment Links\n\n## AWS Console URL\nhttps://us-east-1.console.aws.amazon.com/s3/buckets?region=us-east-1\n\n## App URL\nhttp://image-processor-ui-priye-2024.s3-website-us-east-1.amazonaws.com\n
