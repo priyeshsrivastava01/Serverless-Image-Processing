@@ -1,0 +1,119 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Serverless Image Processing Application
+
+Parameters:
+  SourceBucketName:
+    Type: String
+    Default: my-image-source-bucket
+    Description: S3 bucket for source images
+  
+  DestBucketName:
+    Type: String
+    Default: my-image-thumbnails-bucket
+    Description: S3 bucket for thumbnails
+
+Globals:
+  Function:
+    Timeout: 30
+    MemorySize: 512
+    Runtime: python3.12
+    Architectures: [x86_64]
+  Api:
+    Cors:
+      AllowMethods: "'GET,POST,OPTIONS'"
+      AllowHeaders: "'Content-Type'"
+      AllowOrigin: "'*'"
+
+Resources:
+  # Source S3 Bucket for image uploads
+  SourceBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${SourceBucketName}-${AWS::AccountId}"
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders: ['*']
+            AllowedMethods: [GET, PUT, POST, DELETE, HEAD]
+            AllowedOrigins: ['*']
+            MaxAge: 3000
+
+  # Destination S3 Bucket for thumbnails
+  DestBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${DestBucketName}-${AWS::AccountId}"
+
+  # Lambda function for image processing
+  ImageProcessorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-image-processor"
+      CodeUri: src/
+      Handler: handler.lambda_handler
+      Environment:
+        Variables:
+          DEST_BUCKET: !Ref DestBucket
+          THUMBNAIL_SIZE: "256x256"
+      Events:
+        S3Event:
+          Type: S3
+          Properties:
+            Bucket: !Ref SourceBucket
+            Events: s3:ObjectCreated:*
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Sub "${SourceBucketName}-${AWS::AccountId}"
+        - S3WritePolicy:
+            BucketName: !Sub "${DestBucketName}-${AWS::AccountId}"
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - logs:CreateLogGroup
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+              Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*"
+
+  # Lambda function for generating presigned URLs
+  PresignedUrlFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-presigned-url"
+      CodeUri: src/
+      Handler: presigned_url.lambda_handler
+      Environment:
+        Variables:
+          SOURCE_BUCKET: !Ref SourceBucket
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Path: /presigned-url
+            Method: post
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Sub "${SourceBucketName}-${AWS::AccountId}"
+        - S3WritePolicy:
+            BucketName: !Sub "${SourceBucketName}-${AWS::AccountId}"
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - logs:CreateLogGroup
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+              Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*"
+
+Outputs:
+  SourceBucketName:
+    Description: Name of the source S3 bucket
+    Value: !Ref SourceBucket
+  
+  DestBucketName:
+    Description: Name of the destination S3 bucket
+    Value: !Ref DestBucket
+  
+  PresignedUrlApiEndpoint:
+    Description: API Gateway endpoint for presigned URLs
+    Value: !Sub "https://${ServerlessApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/presigned-url"
