@@ -8,13 +8,16 @@
         body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
         .upload-area { border: 2px dashed #ccc; padding: 40px; text-align: center; margin: 20px 0; }
         .upload-area.dragover { border-color: #007bff; background-color: #f8f9fa; }
-        .btn { background: #007bff; color: white; padding: 10px 20px; border: none; cursor: pointer; }
+        .btn { background: #007bff; color: white; padding: 10px 20px; border: none; cursor: pointer; margin: 5px; }
         .btn:hover { background: #0056b3; }
+        .btn:disabled { background: #6c757d; cursor: not-allowed; }
         .message { padding: 10px; margin: 10px 0; border-radius: 4px; }
         .success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
         .error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
         .hidden { display: none; }
         #preview { max-width: 300px; margin: 10px 0; }
+        .upload-item { border: 1px solid #ddd; padding: 15px; margin: 10px 0; border-radius: 4px; }
+        .upload-status { font-weight: bold; margin: 5px 0; }
     </style>
 </head>
 <body>
@@ -29,14 +32,16 @@
     
     <div id="messages"></div>
     <img id="preview" class="hidden" alt="Preview">
+    <div id="uploadedFiles"></div>
     
     <script>
-        const API_GATEWAY_URL = 'https://0wmy24uqyk.execute-api.us-east-1.amazonaws.com/Prod';
+        const API_GATEWAY_URL = 'https://6311tr4fb4.execute-api.us-east-1.amazonaws.com/Prod';
         
         const uploadArea = document.getElementById('uploadArea');
         const fileInput = document.getElementById('fileInput');
         const messages = document.getElementById('messages');
         const preview = document.getElementById('preview');
+        const uploadedFiles = document.getElementById('uploadedFiles');
         
         // Drag and drop handlers
         uploadArea.addEventListener('dragover', (e) => {
@@ -83,6 +88,19 @@
         }
         
         async function uploadFile(file) {
+            const timestamp = Date.now();
+            const filename = `${timestamp}-${file.name}`;
+            
+            // Create upload item UI
+            const uploadItem = document.createElement('div');
+            uploadItem.className = 'upload-item';
+            uploadItem.innerHTML = `
+                <div><strong>${file.name}</strong></div>
+                <div class="upload-status" id="status-${timestamp}">Uploading...</div>
+                <button class="btn" id="download-${timestamp}" onclick="downloadThumbnail('${filename}')" disabled>Download Thumbnail</button>
+            `;
+            uploadedFiles.appendChild(uploadItem);
+            
             try {
                 // Show preview
                 const reader = new FileReader();
@@ -92,28 +110,33 @@
                 };
                 reader.readAsDataURL(file);
                 
-                // Generate unique filename
-                const timestamp = Date.now();
-                const filename = `${timestamp}-${file.name}`;
-                
                 // Get presigned URL for upload
                 const presignedUrl = await getPresignedUrl(filename, file.type);
                 
-                // Upload file using presigned URL
-                const uploadResponse = await fetch(presignedUrl, {
+                // Upload file to S3
+                const response = await fetch(presignedUrl, {
                     method: 'PUT',
+                    body: file,
                     headers: {
                         'Content-Type': file.type
-                    },
-                    body: file
+                    }
                 });
                 
-                if (uploadResponse.ok) {
-                    showMessage(`Successfully uploaded ${file.name}. Generating thumbnail...`, 'success');
+                if (response.ok) {
+                    document.getElementById(`status-${timestamp}`).textContent = 'Processing thumbnail...';
+                    showMessage(`Successfully uploaded ${file.name}. Thumbnail will be generated shortly.`, 'success');
+                    
+                    // Enable download button after a delay (thumbnail processing time)
+                    setTimeout(() => {
+                        document.getElementById(`status-${timestamp}`).textContent = 'Ready';
+                        document.getElementById(`download-${timestamp}`).disabled = false;
+                    }, 3000);
                 } else {
-                    showMessage(`Failed to upload ${file.name}`, 'error');
+                    throw new Error(`Upload failed: ${response.statusText}`);
                 }
+                
             } catch (error) {
+                document.getElementById(`status-${timestamp}`).textContent = 'Failed';
                 showMessage(`Error uploading ${file.name}: ${error.message}`, 'error');
             }
         }
@@ -137,6 +160,42 @@
             const data = await response.json();
             return data.uploadUrl;
         }
+        
+        async function downloadThumbnail(filename) {
+            try {
+                const response = await fetch(`${API_GATEWAY_URL}/download-url`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        filename: filename
+                    })
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`Failed to get download URL: ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                
+                // Open download URL in new tab with download attribute
+                const link = document.createElement('a');
+                link.href = data.downloadUrl;
+                link.download = `${filename.split('-')[1]}_thumbnail.jpg`;
+                link.target = '_blank';
+                link.rel = 'noopener noreferrer';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                
+                showMessage(`Download started for thumbnail!`, 'success');
+                
+            } catch (error) {
+                showMessage(`Error downloading thumbnail: ${error.message}`, 'error');
+            }
+        }
+
     </script>
 </body>
 </html>
